@@ -10,7 +10,7 @@
 该组件不依赖于任何第三方组件或库
 
 ### 组件代码
-见src目录中的upyun_upload.wpy
+见src目录中的upyun_upload.js
 
 ### 组件使用示例
 见demo目录中的upyun_upload_demo.wpy
