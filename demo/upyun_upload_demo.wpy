@@ -1,0 +1,114 @@
+//本示例仅为代码片段，供参考，请勿直接使用
+
+import wepy from 'wepy'
+import {imageHost, upyunRemotePathPrefix, upyunBucket, upyunOperator, api} from '../config'
+import Upyun from '../utils/upyun-wxapp-sdk'
+import formatDateTime from '../utils/formatDateTime'
+import getRandomString from '../utils/getRandomString'
+import getFileExtension from '../utils/getFileExtension'
+
+//上传图片
+async uploadImage() {
+    if (this.images.length > 0) {
+        try {
+            //又拍云上传签名url
+            const upyunGetSignatureUrl = api.upyunSignature.url
+            const upyun = new Upyun({
+                bucket: upyunBucket,  //又拍云存储服务名称
+                operator: upyunOperator,  //又拍云存储服务操作员
+                getSignatureUrl: upyunGetSignatureUrl  //又拍云上传签名
+            })
+
+            for (let image of this.images) {
+                //上传到又拍云服务器
+                let date = new Date()
+                let formatedD = formatDateTime.formatDate(date, '')  //获得年月日，不带分隔符
+                let formatedDt = formatDateTime.formatDatetime(date, '', '', '_') //获得年月日_时分秒，如：20170808_151522
+                let formatedMs = formatDateTime.formatMillisecond(date)  //获得毫秒
+                let randStr = getRandomString(16)  //获得随机字符串
+                let extension = getFileExtension(image, true)  //获得文件扩展名（即文件后缀）
+
+                //获得又拍云上传策略和数据
+                const upyunPolicyAndData = upyun.getPolicyAndData({
+                    //上传的完整路径（含文件名）
+                    remotePath:
+                        `${upyunRemotePathPrefix}${formatedD}/${formatedDt + formatedMs}_${randStr + extension}`
+                })
+
+                //从后台服务器获得又拍云上传签名
+                let resForSignature = {}
+                try {
+                    resForSignature = await wepy.request({
+                        url: upyunGetSignatureUrl,
+                        data: {
+                            data: upyunPolicyAndData.data
+                        }
+                    })
+                } catch (e) {
+                    console.log('get signature fail, errMsg is: ', resForSignature.errMsg)
+                    console.log('e.stack: ', e.stack)
+                    wepy.hideToast()
+                    wepy.showModal({
+                        title: '提示',
+                        content: '服务器错误，上传图片失败了哦。请重试~',
+                        showCancel: false
+                    })
+                    return
+                }
+
+                //上传签名
+                const upyunSignature = resForSignature.data.signature
+
+                if (upyunSignature) {
+                    //开始正式上传图片文件
+                    let resForUploadImage = {}
+                    try {
+                        resForUploadImage = await wepy.uploadFile({
+                            url: `https://v0.api.upyun.com/${upyunBucket}`,
+                            filePath: image,
+                            name: 'file',
+                            formData: {
+                                authorization: `UPYUN ${upyunOperator}:${upyunSignature}`,
+                                policy: upyunPolicyAndData.policy
+                            }
+                        })
+
+                        //后台服务器传过来的JSON数据，小程序端有时收到的是字符串，并不是JSON对象，而且字符串
+                        //前面还多了几个零宽空白字符，因此先trim一下(这里用replace函数trim)
+                        if (typeof resForUploadImage.data === 'string') {
+                            resForUploadImage.data = JSON.parse(resForUploadImage.data.replace(/(^\s+)|(\s+$)/g, ''))
+                        }
+                        //保存图片路径（用于存储到数据库中； 注： 数据库存储在业务主服务器中，图片文件存储在又拍云服务器中）
+                        pack.images.push(imageHost + resForUploadImage.data.url)
+
+                        wepy.showToast({
+                            title: '图片上传成功',
+                            icon: 'success',
+                            duration: 1000
+                        })
+                    } catch (e) {
+                        console.log('upload file fail, errMsg is: ', resForUploadImage.errMsg)
+                        console.log('e.stack: ', e.stack)
+
+                        wepy.hideToast()
+                        wepy.showModal({
+                            title: '提示',
+                            content: '服务器错误，上传图片失败了哦。请重试~',
+                            showCancel: false
+                        })
+                        return
+                    }
+                } else {
+                    console.log('upyun signature 为空')
+                }
+            }
+        } catch (e) {
+            wepy.hideToast()
+            wepy.showModal({
+                title: '提示',
+                content: '服务器错误，上传图片失败。请重试或截图本提示联系笨笨阿林(微信号：benbenalin)。' + e.message,
+                showCancel: false
+            })
+        }
+    }
+}
